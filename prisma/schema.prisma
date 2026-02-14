@@ -1,0 +1,348 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// 1. USER & AUTHENTICATION
+// ==========================================
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  username        String?   @unique
+  password        String
+  phoneNumber     String?   @unique
+  role            Role      @default(CUSTOMER)
+  isEmailVerified Boolean   @default(false)
+
+  // Relations
+  profile   Profile?
+  addresses Address[]
+  orders    Order[]
+  reviews   Review[]
+  questions Question[] // Questions asked by the user
+  answers   Answer[]   // Answers given by staff/admin
+  wishlist  Wishlist?
+  cart      Cart?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Profile {
+  id        String  @id @default(cuid())
+  firstName String?
+  lastName  String?
+  avatarUrl String?
+  userId    String  @unique
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model Address {
+  id            String      @id @default(cuid())
+  type          AddressType @default(SHIPPING)
+  isDefault     Boolean     @default(false)
+  recipientName String
+  phone         String
+  street        String
+  city          String
+  country       String
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("addresses")
+}
+
+// ==========================================
+// 2. PRODUCT & DYNAMIC SPECS
+// ==========================================
+
+model Product {
+  id             String   @id @default(cuid())
+  name           String
+  description    String   @db.Text
+  basePrice      Decimal  @db.Decimal(12, 2)
+  compareAtPrice Decimal? @db.Decimal(12, 2)
+  sku            String   @unique
+  stock          Int      @default(0)
+  brand          String?
+
+  // Performance Cache
+  avgRating   Float @default(0)
+  reviewCount Int   @default(0)
+
+  // Relations
+  categoryId     String
+  category       Category         @relation(fields: [categoryId], references: [id])
+  images         ProductImage[]
+  specifications Specification[]
+  reviews        Review[]
+  wishlists      Wishlist[]
+  tags           Tag[]
+  questions      Question[]
+  blogPost       BlogPost?
+  cartItems      CartItem[]
+  orderItems     OrderItem[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("products")
+}
+
+model Specification {
+  id           String  @id @default(cuid())
+  key          String  // e.g., "Processor", "RAM"
+  value        String  // e.g., "M3 Pro", "16GB"
+  isFilterable Boolean @default(true)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("specifications")
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  url       String
+  isMain    Boolean @default(false)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_images")
+}
+
+model Category {
+  id       String     @id @default(cuid())
+  name     String     @unique
+  parentId String?
+  parent   Category?  @relation("SubCategories", fields: [parentId], references: [id])
+  children Category[] @relation("SubCategories")
+  products Product[]
+
+  @@map("categories")
+}
+
+// ==========================================
+// 3. CART & ORDERS
+// ==========================================
+
+model Cart {
+  id        String     @id @default(cuid())
+  userId    String     @unique
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String  @id @default(cuid())
+  cartId    String
+  cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int     @default(1)
+
+  @@map("cart_items")
+}
+
+model Order {
+  id              String        @id @default(cuid())
+  orderNumber     Int           @unique @default(autoincrement())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  // Financials
+  total           Decimal       @db.Decimal(12, 2)
+  subTotal        Decimal       @db.Decimal(12, 2)
+  deliveryCharge  Decimal       @default(0) @db.Decimal(12, 2)
+  discount        Decimal       @default(0) @db.Decimal(12, 2)
+  // Statuses
+  status          OrderStatus   @default(PENDING)
+  paymentStatus   PaymentStatus @default(UNPAID)
+  // Payment Integration Fields
+  paymentMethod   String?       // e.g., "STRIPE", "SSLCOMMERZ", "COD", "BKASH"
+  transactionId   String?       @unique // The ID returned by the payment gateway
+  gatewayResponse Json?        // Stores the full raw JSON from the gateway for debugging
+  
+  // Delivery/Shipping Info
+  shippingAddress String        @db.Text
+  contactNumber   String?       // Phone number specifically for delivery
+  estimatedDays   Int?          // Delivery expectation
+  
+  // Relations
+  items           OrderItem[]
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Decimal @db.Decimal(12, 2)
+
+  @@map("order_items")
+}
+
+// ==========================================
+// 4. SOCIAL, SECURITY & SEO
+// ==========================================
+
+model Review {
+  id        String   @id @default(cuid())
+  rating    Int
+  comment   String?  @db.Text
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@map("reviews")
+}
+
+model Wishlist {
+  id       String    @id @default(cuid())
+  userId   String    @unique
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@map("wishlists")
+}
+
+model Tag {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  products Product[]
+
+  @@map("tags")
+}
+
+model Otp {
+  id        String   @id @default(cuid())
+  email     String
+  otp       String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@map("otp")
+}
+
+// ==========================================
+// 5. CUSTOMER Q&A
+// ==========================================
+
+model Question {
+  id          String   @id @default(cuid())
+  content     String   @db.Text
+  isPublished Boolean  @default(false)
+  
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  answers     Answer[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("questions")
+}
+
+model Answer {
+  id         String   @id @default(cuid())
+  content    String   @db.Text
+  
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("answers")
+}
+
+// ==========================================
+// 6. BLOGS & RICH CONTENT
+// ==========================================
+
+model BlogPost {
+  id          String      @id @default(cuid())
+  title       String
+  content     String      @db.Text
+  bannerImage String?
+  authorName  String?     @default("Admin")
+  
+  images      BlogImage[]
+
+  productId   String      @unique
+  product     Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@map("blog_posts")
+}
+
+model BlogImage {
+  id         String   @id @default(cuid())
+  url        String
+  altText    String?
+  order      Int      @default(0)
+
+  blogPostId String
+  blogPost   BlogPost @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+
+  @@map("blog_images")
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum Role {
+  CUSTOMER
+  SUPER_ADMIN
+  ADMIN
+  STAFF
+}
+
+enum AddressType {
+  SHIPPING
+  BILLING
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  FAILED
+}
